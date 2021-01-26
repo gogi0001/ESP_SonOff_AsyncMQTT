@@ -18,13 +18,25 @@
 // #define PIN_RELAY3      4
 // #define PIN_WIFI_LED    13
 
-#define PIN_BTN1        2
+#define PIN_BTN1        13
 #define PIN_BTN2        4
 #define PIN_BTN3        5
 #define PIN_RELAY1      12
 #define PIN_RELAY2      14 
 #define PIN_RELAY3      15
-#define PIN_WIFI_LED    16
+#define PIN_WIFI_LED    LED_BUILTIN
+
+#define LED_STATE_ON    LOW
+#define LED_STATE_OFF   HIGH
+
+#define BUTTONS_COUNT   3
+#define BUTTON_STATE_PUSH       LOW
+#define BUTTON_STATE_RELEASE    HIGH
+
+#define RELAYS_COUNT   3
+#define RELAY_STATE_ON  LOW
+#define RELAY_STATE_OFF HIGH
+
 
 #define SR_WAITING      BIT0
 #define SR_PONG         BIT1
@@ -37,10 +49,6 @@
 
 uint8_t uiReportBits = 0;
 uint8_t uiExitCode = 0;
-
-#define BUTTONS_COUNT   3
-#define BUTTON_STATE_PUSH       LOW
-#define BUTTON_STATE_RELEASE    HIGH
 
 typedef struct {
     uint8_t uiPin;
@@ -55,10 +63,6 @@ button_t xButtons[BUTTONS_COUNT] = {
     { PIN_BTN3, BUTTON_STATE_RELEASE, BUTTON_STATE_RELEASE, false },
 };
 
-
-#define RELAYS_COUNT   3
-#define RELAY_STATE_ON  LOW
-#define RELAY_STATE_OFF HIGH
 
 typedef enum {
     RELAY_CMD_NONE = 0,
@@ -84,7 +88,6 @@ relay_t xRelays[RELAYS_COUNT] = {
 char pcPingPayload[20] = "0";
 int64_t iPingPayload = 0;
 
-Ticker xReadIOTimer;
 Ticker xReadButtonsTimer;
 Ticker xRelayCommandTimer;
 Ticker xReportTimer;
@@ -94,7 +97,30 @@ uint32_t uiLastPingReceived = 0;
 bool bExternalControlEnabled = false;
 Ticker xNoPingWatchTimer;
 
+Ticker xBlinkTimer;
+uint8_t uiBlinks;
+uint8_t uiLedState = LED_STATE_OFF;
 
+void vBlinkHandler() {
+    if (uiLedState == LED_STATE_OFF) {
+        if (uiBlinks == 0) return;
+        uiLedState = LED_STATE_ON;
+        digitalWrite(PIN_WIFI_LED, uiLedState);
+        xBlinkTimer.once_ms(200, vBlinkHandler);
+    } else {
+        uiBlinks--;
+        uiLedState = LED_STATE_OFF;
+        digitalWrite(PIN_WIFI_LED, uiLedState);
+        if (uiBlinks > 0) xBlinkTimer.once_ms(300, vBlinkHandler);
+    }
+}
+
+void vBlink(uint8_t uiCount) {
+    if (uiCount == 0) return;
+    uiBlinks = uiCount;
+    uiLedState = LED_STATE_OFF;
+    vBlinkHandler();
+}
 
 
 void vNoPingWatchHandler() {
@@ -108,6 +134,7 @@ void vNoPingWatchHandler() {
 
 void vPingCB(char* pcTopic, char* pcPayload, size_t len) {
     bExternalControlEnabled = true;
+    vBlink(1);
     uiLastPingReceived = millis();
     Serial.printf("[ vPingCB ] MQTT Ping received. Payload: %s\n", pcPayload);
     strcpy(pcPingPayload, pcPayload);
@@ -137,7 +164,7 @@ relay_command_t xParseRelayCommand(char * pcState) {
 
 void vMessageCB(char* pcTopic, char* pcPayload, size_t len) {
     Serial.printf("[ vMessageCB ] Event arrived!\n");
-
+    vBlink(1);
     JSONVar pxPayload = JSON.parse(pcPayload);
 
     if (JSON.typeof(pxPayload) != "undefined") {
@@ -269,6 +296,9 @@ void setup() {
     pinMode(PIN_RELAY2, OUTPUT); digitalWrite(PIN_RELAY2, RELAY_STATE_OFF);
     pinMode(PIN_RELAY3, OUTPUT); digitalWrite(PIN_RELAY3, RELAY_STATE_OFF);
 
+    pinMode(PIN_WIFI_LED, OUTPUT); digitalWrite(PIN_WIFI_LED, RELAY_STATE_OFF);
+ 
+
     pinMode(PIN_BTN1, INPUT_PULLUP);
     pinMode(PIN_BTN2, INPUT_PULLUP);
     pinMode(PIN_BTN3, INPUT_PULLUP);
@@ -282,7 +312,7 @@ void setup() {
     pvMessageCB = vMessageCB;
     pvPingCB = vPingCB;
     netSetup();
-
+    vBlink(3);
 }
 
 void loop() {
