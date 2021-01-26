@@ -9,6 +9,7 @@
 
 #include <net_routine.h>
 
+// ----------- Пины для выключателя -----------------
 // #define PIN_BTN1        0
 // #define PIN_BTN2        9
 // #define PIN_BTN3        10
@@ -29,6 +30,7 @@
 char pcPingPayload[20] = "0";
 int64_t iPingPayload = 0;
 
+Ticker xReadIOTimer;
 Ticker xReadButtonsTimer;
 uint32_t uiLastPingReceived = 0;
 bool bExternalControlEnabled = false;
@@ -124,7 +126,38 @@ void vStateReport(bool bAlarm) {
     delete pxReport;
 }
 
+void vReadButtonsIO() {
+    uiBtn1Read = digitalRead(PIN_BTN1);
+    if (uiBtn1Read != uiBtn1State) {
+        uiBtn1State = uiBtn1Read;
+        bBtn1Changed = true;
+    }
+    uiBtn2Read = digitalRead(PIN_BTN2);
+    if (uiBtn2Read != uiBtn2State) {
+        uiBtn2State = uiBtn2Read;
+        bBtn2Changed = true;
+    }
+    uiBtn3Read = digitalRead(PIN_BTN3);
+    if (uiBtn3Read != uiBtn3State) {
+        uiBtn3State = uiBtn3Read;
+        bBtn3Changed = true;
+    }
+}
+
 void vReadButtonsHandler() {
+    vReadButtonsIO();
+    if (bBtn1Changed) {
+        bBtn1Changed = false;
+        Serial.printf("[ vReadButtonsHandler ] Button 1 changed => %i\n", uiBtn1State);
+    }
+    if (bBtn2Changed) {
+        bBtn2Changed = false;
+        Serial.printf("[ vReadButtonsHandler ] Button 2 changed => %i\n", uiBtn2State);
+    }
+    if (bBtn3Changed) {
+        bBtn3Changed = false;
+        Serial.printf("[ vReadButtonsHandler ] Button 3 changed => %i\n", uiBtn3State);
+    }
 }
 
 
