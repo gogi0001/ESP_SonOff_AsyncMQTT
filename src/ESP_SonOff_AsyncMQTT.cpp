@@ -26,29 +26,76 @@
 #define PIN_RELAY3      15
 #define PIN_WIFI_LED    16
 
+#define SR_WAITING      BIT0
+#define SR_PONG         BIT1
+#define SR_RELAY1       BIT2
+#define SR_RELAY2       BIT3
+#define SR_RELAY3       BIT4
+#define SR_RELAYS       SR_RELAY1 | SR_RELAY2 | SR_RELAY3       
+#define SR_EXIT_CODE    BIT5
+#define SR_DEVINFO      BIT6
+
+uint8_t uiReportBits = 0;
+uint8_t uiExitCode = 0;
+
+#define BUTTONS_COUNT   3
+#define BUTTON_STATE_PUSH       LOW
+#define BUTTON_STATE_RELEASE    HIGH
+
+typedef struct {
+    uint8_t uiPin;
+    uint8_t uiRead;
+    uint8_t uiState;
+    bool bChanged;
+} button_t;
+
+button_t xButtons[BUTTONS_COUNT] = {
+    { PIN_BTN1, BUTTON_STATE_RELEASE, BUTTON_STATE_RELEASE, false },
+    { PIN_BTN2, BUTTON_STATE_RELEASE, BUTTON_STATE_RELEASE, false },
+    { PIN_BTN3, BUTTON_STATE_RELEASE, BUTTON_STATE_RELEASE, false },
+};
+
+
+#define RELAYS_COUNT   3
+#define RELAY_STATE_ON  LOW
+#define RELAY_STATE_OFF HIGH
+
+typedef enum {
+    RELAY_CMD_NONE = 0,
+    RELAY_CMD_ON,
+    RELAY_CMD_OFF,
+    RELAY_CMD_TOGGLE
+} relay_command_t;
+
+typedef struct {
+    uint8_t uiPin;
+    uint8_t uiState;
+    relay_command_t xScheduledCommand;
+    bool bScheduledCommandChanged;
+    uint8_t uiReportBit;
+} relay_t;
+
+relay_t xRelays[RELAYS_COUNT] = {
+    { PIN_RELAY1, RELAY_STATE_OFF, RELAY_CMD_NONE, false, SR_RELAY1 },
+    { PIN_RELAY2, RELAY_STATE_OFF, RELAY_CMD_NONE, false, SR_RELAY2 },
+    { PIN_RELAY3, RELAY_STATE_OFF, RELAY_CMD_NONE, false, SR_RELAY3 },
+};
 
 char pcPingPayload[20] = "0";
 int64_t iPingPayload = 0;
 
 Ticker xReadIOTimer;
 Ticker xReadButtonsTimer;
+Ticker xRelayCommandTimer;
+Ticker xReportTimer;
+
+
 uint32_t uiLastPingReceived = 0;
 bool bExternalControlEnabled = false;
 Ticker xNoPingWatchTimer;
 
 
-static uint8_t uiBtn1State = HIGH;
-static uint8_t uiBtn1Read = HIGH;
-static bool bBtn1Changed = false;
-static uint8_t uiBtn2State = HIGH;
-static uint8_t uiBtn2Read = HIGH;
-static bool bBtn2Changed = false;
-static uint8_t uiBtn3State = HIGH;
-static uint8_t uiBtn3Read = HIGH;
-static bool bBtn3Changed = false;
 
-
-void vStateReport(bool bAlarm);
 
 void vNoPingWatchHandler() {
     if (bExternalControlEnabled) return;
@@ -62,44 +109,71 @@ void vNoPingWatchHandler() {
 void vPingCB(char* pcTopic, char* pcPayload, size_t len) {
     bExternalControlEnabled = true;
     uiLastPingReceived = millis();
-    Serial.printf("[ PingCB ] MQTT Ping received. Payload: %s\n", pcPayload);
+    Serial.printf("[ vPingCB ] MQTT Ping received. Payload: %s\n", pcPayload);
     strcpy(pcPingPayload, pcPayload);
     iPingPayload = atoll(pcPingPayload);
     if (timeStatus() == timeNotSet && iPingPayload != 0) {
         time_t xTime = iPingPayload / 1000 + SECS_PER_HOUR * TIME_ZONE;
         setTime(xTime);
-        Serial.printf("[ PingCB ] Time is set to %02d.%02d.%04d %02d:%02d:%02d\n", day(), month(), year(), hour(), minute(), second());
+        Serial.printf("[ vPingCB ] Time is set to %02d.%02d.%04d %02d:%02d:%02d\n", day(), month(), year(), hour(), minute(), second());
     }
-    vStateReport(false);
+    uiReportBits |= SR_WAITING | SR_PONG | SR_RELAYS;
+}
+
+relay_command_t xParseRelayCommand(char * pcState) {
+    if ((strcmp(pcState, "ON") == 0) || (strcmp(pcState, "on") == 0)) {
+        return RELAY_CMD_ON;
+    } 
+    else if ((strcmp(pcState, "OFF") == 0) || (strcmp(pcState, "off") == 0)) {
+        return RELAY_CMD_OFF;
+    }
+    else if ((strcmp(pcState, "TOGGLE") == 0) || (strcmp(pcState, "toggle") == 0)) {
+        return RELAY_CMD_TOGGLE;
+    } else {
+        Serial.printf("[ xParseRelayCommand ] Unsupported state %s\n", pcState);
+        return RELAY_CMD_NONE;
+    }
 }
 
 void vMessageCB(char* pcTopic, char* pcPayload, size_t len) {
-    Serial.printf("[ MessageCB ] Event arrived!\n");
+    Serial.printf("[ vMessageCB ] Event arrived!\n");
 
     JSONVar pxPayload = JSON.parse(pcPayload);
 
     if (JSON.typeof(pxPayload) != "undefined") {
-        Serial.print("[ MessageCB ] MQTT payload successfully parsed as JSON: ");
+        Serial.print("[ vMessageCB ] MQTT payload successfully parsed as JSON: ");
         Serial.println(JSON.stringify(pxPayload));
     } else {
-        Serial.println("[ MessageCB ] FAIL Can't parse MQTT payload. Nothing to do :(");
+        Serial.println("[ vMessageCB ] FAIL Can't parse MQTT payload. Nothing to do :(");
         return;
+    }
+    
+    char pcState[20];
+
+    if (pxPayload.hasOwnProperty("l1_state")) {
+        strcpy(pcState, (const char*) pxPayload["l1_state"]);
+        xRelays[0].xScheduledCommand = xParseRelayCommand(pcState);
+        xRelays[0].bScheduledCommandChanged = (xRelays[0].xScheduledCommand != RELAY_CMD_NONE);
+    }
+
+    if (pxPayload.hasOwnProperty("l2_state")) {
+        strcpy(pcState, (const char*) pxPayload["l2_state"]);
+        xRelays[1].xScheduledCommand = xParseRelayCommand(pcState);
+        xRelays[1].bScheduledCommandChanged = (xRelays[1].xScheduledCommand != RELAY_CMD_NONE);
+    }
+
+    if (pxPayload.hasOwnProperty("l3_state")) {
+        strcpy(pcState, (const char*) pxPayload["l3_state"]);
+        xRelays[2].xScheduledCommand = xParseRelayCommand(pcState);
+        xRelays[2].bScheduledCommandChanged = (xRelays[2].xScheduledCommand != RELAY_CMD_NONE);
     }
 
     if (pxPayload.hasOwnProperty("command")) {
-        char pcCommmand[20];
-        strcpy(pcCommmand, (const char*) pxPayload["command"]);
-        // if (strcmp(pcCommmand, "STOP") == 0) {
-        //     vWingCommand(WING_CMD_STOP);
-        // } 
-        // else if (strcmp(pcCommmand, "OPEN") == 0) {
-        //     vWingCommand(WING_CMD_OPEN);            
-        // } 
-        // else if (strcmp(pcCommmand, "CLOSE") == 0) {
-        //     vWingCommand(WING_CMD_CLOSE);            
-        // } else {
-        //     Serial.printf("[ MessageCB ] Unsupported command %s\n", pcCommmand);
-        // }
+        char pcCommand[20];
+        strcpy(pcCommand, (const char*) pxPayload["command"]);
+        if ((strcmp(pcCommand, "STATUS") == 0) || (strcmp(pcCommand, "status") == 0)) {
+            uiReportBits |= SR_WAITING | SR_DEVINFO;
+        } 
     }
 
     delete pxPayload;
@@ -108,18 +182,24 @@ void vMessageCB(char* pcTopic, char* pcPayload, size_t len) {
 
 
 
-void vStateReport(bool bAlarm) {
+void vStateReportHandler() {
+    if (!(uiReportBits & SR_WAITING)) return;
+    uint8_t uiBits = uiReportBits;
+    uiReportBits = 0;
     JSONVar pxReport;
-    char cBuf[32];
+    // char cBuf[32];
 
-    if (bAlarm) {
-        // * Если репорт формируется из-за какого-то события, отправляем только краткое сообщение о событии и выходим.
-    } 
-    else {
-        // Это обычный регулярный отчет о состоянии. Формируем полный отчет и выходим.
-        pxReport["pong"] = (double)iPingPayload;
+    if (uiBits & SR_PONG) { pxReport["pong"] = (double)iPingPayload; }
+    if (uiBits & SR_RELAY1) { pxReport["l1_state"] = (xRelays[0].uiState == RELAY_STATE_ON) ? "ON" : "OFF"; }
+    if (uiBits & SR_RELAY2) { pxReport["l2_state"] = (xRelays[1].uiState == RELAY_STATE_ON) ? "ON" : "OFF"; }
+    if (uiBits & SR_RELAY3) { pxReport["l3_state"] = (xRelays[2].uiState == RELAY_STATE_ON) ? "ON" : "OFF"; }
+    if (uiBits & SR_EXIT_CODE) { pxReport["exit_code"] = uiExitCode; }
+    if (uiBits & SR_DEVINFO) { 
+        pxReport["device_id"] = NR_DEVICE_ID; 
+        pxReport["device_alias"] = NR_DEVICE_ALIAS; 
+        pxReport["ip_address"] = WiFi.localIP().toString(); 
     }
-
+    
     String sReport = JSON.stringify(pxReport);
     Serial.printf("[ vStateReport ] Report prepared! %s\n", sReport.c_str());
     vPublishReport(sReport);
@@ -127,58 +207,75 @@ void vStateReport(bool bAlarm) {
 }
 
 void vReadButtonsIO() {
-    uiBtn1Read = digitalRead(PIN_BTN1);
-    if (uiBtn1Read != uiBtn1State) {
-        uiBtn1State = uiBtn1Read;
-        bBtn1Changed = true;
-    }
-    uiBtn2Read = digitalRead(PIN_BTN2);
-    if (uiBtn2Read != uiBtn2State) {
-        uiBtn2State = uiBtn2Read;
-        bBtn2Changed = true;
-    }
-    uiBtn3Read = digitalRead(PIN_BTN3);
-    if (uiBtn3Read != uiBtn3State) {
-        uiBtn3State = uiBtn3Read;
-        bBtn3Changed = true;
+    for (int i = 0; i < BUTTONS_COUNT; i++) {
+        xButtons[i].uiRead = digitalRead(xButtons[i].uiPin);
+        if (xButtons[i].uiRead != xButtons[i].uiState) {
+            xButtons[i].bChanged = true;
+            xButtons[i].uiState = xButtons[i].uiRead;
+        }
     }
 }
 
 void vReadButtonsHandler() {
     vReadButtonsIO();
-    if (bBtn1Changed) {
-        bBtn1Changed = false;
-        Serial.printf("[ vReadButtonsHandler ] Button 1 changed => %i\n", uiBtn1State);
-    }
-    if (bBtn2Changed) {
-        bBtn2Changed = false;
-        Serial.printf("[ vReadButtonsHandler ] Button 2 changed => %i\n", uiBtn2State);
-    }
-    if (bBtn3Changed) {
-        bBtn3Changed = false;
-        Serial.printf("[ vReadButtonsHandler ] Button 3 changed => %i\n", uiBtn3State);
+
+    for (int i = 0; i < BUTTONS_COUNT; i++) {
+        if (xButtons[i].bChanged) {
+            xButtons[i].bChanged = false;
+            Serial.printf("[ vReadButtonsHandler ] Button %i changed => %i\n", i, xButtons[i].uiState);
+            if (xButtons[i].uiState == BUTTON_STATE_PUSH) {
+                xRelays[i].xScheduledCommand = RELAY_CMD_TOGGLE;
+                xRelays[i].bScheduledCommandChanged = true;
+            }
+        }
     }
 }
 
 
+void vRelayCommandScheduledHandler() {
+    for (int i = 0; i < RELAYS_COUNT; i++) {
+        if (xRelays[i].bScheduledCommandChanged) {
+            xRelays[i].bScheduledCommandChanged = false;
+            switch (xRelays[i].xScheduledCommand) {
+            case RELAY_CMD_NONE:
+                continue;
+            case RELAY_CMD_ON:
+                xRelays[i].uiState = RELAY_STATE_ON;
+                break;        
+            case RELAY_CMD_OFF:
+                xRelays[i].uiState = RELAY_STATE_OFF;
+                break;
+            case RELAY_CMD_TOGGLE:
+                xRelays[i].uiState = !digitalRead(xRelays[i].uiPin);
+                break;
+            }
+            if (xRelays[i].xScheduledCommand != RELAY_CMD_NONE) {
+                digitalWrite(xRelays[i].uiPin, xRelays[i].uiState);
+                uiReportBits |= SR_WAITING | xRelays[i].uiReportBit;
+                Serial.printf("[ vRelayCommandScheduledHandler ] Relay %i set to %i\n", i, xRelays[i].uiState);
+            }
+        }
+    }
+}
+
 void setup() {
     Serial.begin(115200);
-    Serial.println();
-    Serial.println();
+    Serial.printf("\n\n\n");
+    Serial.printf("====================================================\n");
+    Serial.printf("Welcome! Device " NR_DEVICE_ID " prepared to run... \n");
+    Serial.printf("====================================================\n\n");
 
-    pinMode(PIN_RELAY1, OUTPUT); 
-    digitalWrite(PIN_RELAY1, LOW);
-    pinMode(PIN_RELAY2, OUTPUT); 
-    digitalWrite(PIN_RELAY2, LOW);
-    pinMode(PIN_RELAY3, OUTPUT); 
-    digitalWrite(PIN_RELAY3, LOW);
+    pinMode(PIN_RELAY1, OUTPUT); digitalWrite(PIN_RELAY1, RELAY_STATE_OFF);
+    pinMode(PIN_RELAY2, OUTPUT); digitalWrite(PIN_RELAY2, RELAY_STATE_OFF);
+    pinMode(PIN_RELAY3, OUTPUT); digitalWrite(PIN_RELAY3, RELAY_STATE_OFF);
 
     pinMode(PIN_BTN1, INPUT_PULLUP);
     pinMode(PIN_BTN2, INPUT_PULLUP);
     pinMode(PIN_BTN3, INPUT_PULLUP);
 
-
     xReadButtonsTimer.attach_ms(50, vReadButtonsHandler);
+    xRelayCommandTimer.attach_ms(50, vRelayCommandScheduledHandler);
+    xReportTimer.attach_ms(500, vStateReportHandler);
 
 
     xNoPingWatchTimer.attach(WAIT_FOR_PING_SECS, vNoPingWatchHandler);
