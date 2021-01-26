@@ -35,6 +35,17 @@ bool bExternalControlEnabled = false;
 Ticker xNoPingWatchTimer;
 
 
+static uint8_t uiBtn1State = HIGH;
+static uint8_t uiBtn1Read = HIGH;
+static bool bBtn1Changed = false;
+static uint8_t uiBtn2State = HIGH;
+static uint8_t uiBtn2Read = HIGH;
+static bool bBtn2Changed = false;
+static uint8_t uiBtn3State = HIGH;
+static uint8_t uiBtn3Read = HIGH;
+static bool bBtn3Changed = false;
+
+
 void vStateReport(bool bAlarm);
 
 void vNoPingWatchHandler() {
