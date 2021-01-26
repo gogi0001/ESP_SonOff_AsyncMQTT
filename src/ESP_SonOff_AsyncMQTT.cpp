@@ -207,7 +207,9 @@ void vMessageCB(char* pcTopic, char* pcPayload, size_t len) {
     // Serial.printf("4.free mem:\t%d\n", system_get_free_heap_size());
 }
 
-
+void vNetEventCB(uint8_t uiEventCode) {
+    // Serial.printf("[ vNetEventCB ] Event code %i\n", uiEventCode);
+}
 
 void vStateReportHandler() {
     if (!(uiReportBits & SR_WAITING)) return;
@@ -307,12 +309,12 @@ void setup() {
     xRelayCommandTimer.attach_ms(50, vRelayCommandScheduledHandler);
     xReportTimer.attach_ms(500, vStateReportHandler);
 
-
     xNoPingWatchTimer.attach(WAIT_FOR_PING_SECS, vNoPingWatchHandler);
     pvMessageCB = vMessageCB;
     pvPingCB = vPingCB;
     netSetup();
-    vBlink(3);
+    pvNetEventCB = vNetEventCB;
+    // vBlink(3);
 }
 
 void loop() {
