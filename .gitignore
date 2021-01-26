@@ -2,3 +2,5 @@
 .vscode
 .piolibdeps
 platformio.ini
+include/env_options.h
+include/env_options_develop.h
