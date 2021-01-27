@@ -38,7 +38,7 @@
 #define RELAY_STATE_ON  LOW
 #define RELAY_STATE_OFF HIGH
 
-#define AUTOOFF_DELAY_SECS  10
+#define AUTOOFF_DELAY_SECS  3600
 
 
 #define SR_WAITING      BIT0
