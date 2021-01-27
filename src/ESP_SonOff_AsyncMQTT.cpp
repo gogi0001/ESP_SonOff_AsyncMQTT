@@ -9,7 +9,7 @@
 
 #include <net_routine.h>
 
-// ----------- Пины для выключателя -----------------
+// ----------- Пины esp8285 -----------------
 // #define PIN_BTN1        0
 // #define PIN_BTN2        9
 // #define PIN_BTN3        10
@@ -18,6 +18,7 @@
 // #define PIN_RELAY3      4
 // #define PIN_WIFI_LED    13
 
+// ----------- Пины nodemcu -----------------
 #define PIN_BTN1        13
 #define PIN_BTN2        4
 #define PIN_BTN3        5
@@ -55,12 +56,14 @@ typedef struct {
     uint8_t uiRead;
     uint8_t uiState;
     bool bChanged;
+    uint32_t ulChangedAt;
+    uint32_t ulPrevStateDuration;
 } button_t;
 
 button_t xButtons[BUTTONS_COUNT] = {
-    { PIN_BTN1, BUTTON_STATE_RELEASE, BUTTON_STATE_RELEASE, false },
-    { PIN_BTN2, BUTTON_STATE_RELEASE, BUTTON_STATE_RELEASE, false },
-    { PIN_BTN3, BUTTON_STATE_RELEASE, BUTTON_STATE_RELEASE, false },
+    { PIN_BTN1, BUTTON_STATE_RELEASE, BUTTON_STATE_RELEASE, false, 0, 0 },
+    { PIN_BTN2, BUTTON_STATE_RELEASE, BUTTON_STATE_RELEASE, false, 0, 0 },
+    { PIN_BTN3, BUTTON_STATE_RELEASE, BUTTON_STATE_RELEASE, false, 0, 0 },
 };
 
 
@@ -77,12 +80,13 @@ typedef struct {
     relay_command_t xScheduledCommand;
     bool bScheduledCommandChanged;
     uint8_t uiReportBit;
+    uint32_t ulChangedAt;
 } relay_t;
 
 relay_t xRelays[RELAYS_COUNT] = {
-    { PIN_RELAY1, RELAY_STATE_OFF, RELAY_CMD_NONE, false, SR_RELAY1 },
-    { PIN_RELAY2, RELAY_STATE_OFF, RELAY_CMD_NONE, false, SR_RELAY2 },
-    { PIN_RELAY3, RELAY_STATE_OFF, RELAY_CMD_NONE, false, SR_RELAY3 },
+    { PIN_RELAY1, RELAY_STATE_OFF, RELAY_CMD_NONE, false, SR_RELAY1, 0 },
+    { PIN_RELAY2, RELAY_STATE_OFF, RELAY_CMD_NONE, false, SR_RELAY2, 0 },
+    { PIN_RELAY3, RELAY_STATE_OFF, RELAY_CMD_NONE, false, SR_RELAY3, 0 },
 };
 
 char pcPingPayload[20] = "0";
@@ -239,6 +243,9 @@ void vReadButtonsIO() {
     for (int i = 0; i < BUTTONS_COUNT; i++) {
         xButtons[i].uiRead = digitalRead(xButtons[i].uiPin);
         if (xButtons[i].uiRead != xButtons[i].uiState) {
+            uint32_t ulNow = millis(); 
+            xButtons[i].ulPrevStateDuration = ulNow - xButtons[i].ulChangedAt;
+            xButtons[i].ulChangedAt = ulNow;
             xButtons[i].bChanged = true;
             xButtons[i].uiState = xButtons[i].uiRead;
         }
@@ -264,6 +271,7 @@ void vReadButtonsHandler() {
 void vRelayCommandScheduledHandler() {
     for (int i = 0; i < RELAYS_COUNT; i++) {
         if (xRelays[i].bScheduledCommandChanged) {
+            uint8_t uiCurrState = digitalRead(xRelays[i].uiPin);
             xRelays[i].bScheduledCommandChanged = false;
             switch (xRelays[i].xScheduledCommand) {
             case RELAY_CMD_NONE:
@@ -275,10 +283,11 @@ void vRelayCommandScheduledHandler() {
                 xRelays[i].uiState = RELAY_STATE_OFF;
                 break;
             case RELAY_CMD_TOGGLE:
-                xRelays[i].uiState = !digitalRead(xRelays[i].uiPin);
+                xRelays[i].uiState = !uiCurrState;
                 break;
             }
             if (xRelays[i].xScheduledCommand != RELAY_CMD_NONE) {
+                if (xRelays[i].uiState != uiCurrState) xRelays[i].ulChangedAt = millis(); // Фиксируем только реальное изменение состояния
                 digitalWrite(xRelays[i].uiPin, xRelays[i].uiState);
                 uiReportBits |= SR_WAITING | xRelays[i].uiReportBit;
                 Serial.printf("[ vRelayCommandScheduledHandler ] Relay %i set to %i\n", i, xRelays[i].uiState);
