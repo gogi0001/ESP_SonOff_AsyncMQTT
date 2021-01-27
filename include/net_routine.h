@@ -23,7 +23,15 @@ typedef void (*vMessageCB_t)(char* topic, char* payload, size_t len);
 vMessageCB_t pvMessageCB = NULL;
 vMessageCB_t pvPingCB = NULL;
 
-typedef void (*vNetEventCB_t)(uint8_t uiEventCode);
+
+typedef enum {
+  NE_WIFI_CONNECTED = 0,
+  NE_WIFI_DISCONNECTED,
+  NE_MQTT_CONNECTED,
+  NE_MQTT_DISCONNECTED
+} net_event_code_t;
+
+typedef void (*vNetEventCB_t)(net_event_code_t xEventCode);
 vNetEventCB_t pvNetEventCB = NULL;
 
 AsyncMqttClient mqttClient;
@@ -48,7 +56,7 @@ void onWifiConnect(const WiFiEventStationModeGotIP& event) {
   Serial.print("\tMASK:\t"); Serial.println(WiFi.subnetMask());
   Serial.print("\tGW:\t"); Serial.println(WiFi.gatewayIP());
   Serial.print("\tDNS:\t"); Serial.println(WiFi.dnsIP());
-  if (pvNetEventCB) pvNetEventCB(0);
+  if (pvNetEventCB) pvNetEventCB(NE_WIFI_CONNECTED);
 
   setupOTAServer();
   connectToMqtt();
@@ -58,7 +66,7 @@ void onWifiDisconnect(const WiFiEventStationModeDisconnected& event) {
   Serial.printf("[ onWifiDisconnect ] Disconnected from Wi-Fi (Reason: %i)\n", (int)event.reason);
   mqttReconnectTimer.detach(); // ensure we don't reconnect to MQTT while reconnecting to Wi-Fi
   wifiReconnectTimer.once(2, connectToWifi);
-  if (pvNetEventCB) pvNetEventCB(1);
+  if (pvNetEventCB) pvNetEventCB(NE_WIFI_DISCONNECTED);
 }
 
 void connectToMqtt() {
@@ -76,7 +84,7 @@ void onMqttConnect(bool sessionPresent) {
     sprintf(cPayload, "{\"connected\":true, \"device_id\":\"" NR_DEVICE_ID "\", \"device_alias\":\"" NR_DEVICE_ALIAS "\", \"ip_address\":\"%s\"}", WiFi.localIP().toString().c_str());
     mqttClient.publish(mqttReportTopic, 0, false, cPayload);
     Serial.printf("[ onMqttConnect ] Welcome to %s\n", mqttReportTopic);
-    if (pvNetEventCB) pvNetEventCB(2);
+    if (pvNetEventCB) pvNetEventCB(NE_MQTT_CONNECTED);
 
 }
 
@@ -86,7 +94,7 @@ void onMqttDisconnect(AsyncMqttClientDisconnectReason reason) {
   if (WiFi.isConnected()) {
     mqttReconnectTimer.once(2, connectToMqtt);
   }
-  if (pvNetEventCB) pvNetEventCB(3);
+  if (pvNetEventCB) pvNetEventCB(NE_MQTT_DISCONNECTED);
 }
 
 // void onMqttSubscribe(uint16_t packetId, uint8_t qos) {

@@ -19,16 +19,16 @@
 // #define PIN_WIFI_LED    13
 
 // ----------- Пины nodemcu -----------------
-#define PIN_BTN1        13
-#define PIN_BTN2        4
-#define PIN_BTN3        5
-#define PIN_RELAY1      12
-#define PIN_RELAY2      14 
-#define PIN_RELAY3      15
+#define PIN_BTN1        14
+#define PIN_BTN2        12
+#define PIN_BTN3        13
+#define PIN_RELAY1      4
+#define PIN_RELAY2      5 
+#define PIN_RELAY3      16
 #define PIN_WIFI_LED    LED_BUILTIN
 
-#define LED_STATE_ON    LOW
-#define LED_STATE_OFF   HIGH
+#define LED_STATE_ON            LOW
+#define LED_STATE_OFF           HIGH
 
 #define BUTTONS_COUNT   3
 #define BUTTON_STATE_PUSH       LOW
@@ -37,6 +37,8 @@
 #define RELAYS_COUNT   3
 #define RELAY_STATE_ON  LOW
 #define RELAY_STATE_OFF HIGH
+
+#define AUTOOFF_DELAY_SECS  10
 
 
 #define SR_WAITING      BIT0
@@ -81,12 +83,14 @@ typedef struct {
     bool bScheduledCommandChanged;
     uint8_t uiReportBit;
     uint32_t ulChangedAt;
+    uint16_t uiAutoOffAfterSecs;
+    Ticker xAutoOffTimer;
 } relay_t;
 
 relay_t xRelays[RELAYS_COUNT] = {
-    { PIN_RELAY1, RELAY_STATE_OFF, RELAY_CMD_NONE, false, SR_RELAY1, 0 },
-    { PIN_RELAY2, RELAY_STATE_OFF, RELAY_CMD_NONE, false, SR_RELAY2, 0 },
-    { PIN_RELAY3, RELAY_STATE_OFF, RELAY_CMD_NONE, false, SR_RELAY3, 0 },
+    { PIN_RELAY1, RELAY_STATE_OFF, RELAY_CMD_NONE, false, SR_RELAY1, 0, AUTOOFF_DELAY_SECS },
+    { PIN_RELAY2, RELAY_STATE_OFF, RELAY_CMD_NONE, false, SR_RELAY2, 0, AUTOOFF_DELAY_SECS },
+    { PIN_RELAY3, RELAY_STATE_OFF, RELAY_CMD_NONE, false, SR_RELAY3, 0, AUTOOFF_DELAY_SECS },
 };
 
 char pcPingPayload[20] = "0";
@@ -131,7 +135,7 @@ void vNoPingWatchHandler() {
     if (bExternalControlEnabled) return;
     uint16_t uiDiff = (millis() - uiLastPingReceived) / 1000;
     if (uiDiff > WAIT_FOR_PING_SECS) {
-        bExternalControlEnabled = true;
+        bExternalControlEnabled = false;
         Serial.printf("[ vNoPingWatchHandler ] Ping Watch timer interrupt. No pings were received in %d secs\n", uiDiff);
     }
 }
@@ -211,8 +215,19 @@ void vMessageCB(char* pcTopic, char* pcPayload, size_t len) {
     // Serial.printf("4.free mem:\t%d\n", system_get_free_heap_size());
 }
 
-void vNetEventCB(uint8_t uiEventCode) {
+void vNetEventCB(net_event_code_t xEventCode) {
     // Serial.printf("[ vNetEventCB ] Event code %i\n", uiEventCode);
+    switch (xEventCode) {
+    case NE_WIFI_CONNECTED:
+        vBlink(3);
+        break;
+    case NE_MQTT_DISCONNECTED:
+        // vBlink(5);
+        bExternalControlEnabled = false;    
+    default:
+        break;
+    }
+
 }
 
 void vStateReportHandler() {
@@ -267,6 +282,13 @@ void vReadButtonsHandler() {
     }
 }
 
+void vAutoOffCB(uint8_t uiRelayIdx) {
+    if (bExternalControlEnabled) return;
+    Serial.printf("[ vAutoOffCB ] Relay %i turned OFF!\n", uiRelayIdx);
+    xRelays[uiRelayIdx].xScheduledCommand = RELAY_CMD_OFF;
+    xRelays[uiRelayIdx].bScheduledCommandChanged = true;
+
+}
 
 void vRelayCommandScheduledHandler() {
     for (int i = 0; i < RELAYS_COUNT; i++) {
@@ -287,10 +309,16 @@ void vRelayCommandScheduledHandler() {
                 break;
             }
             if (xRelays[i].xScheduledCommand != RELAY_CMD_NONE) {
-                if (xRelays[i].uiState != uiCurrState) xRelays[i].ulChangedAt = millis(); // Фиксируем только реальное изменение состояния
+                if (xRelays[i].uiState != uiCurrState) {
+                    xRelays[i].ulChangedAt = millis(); // Фиксируем только реальное изменение состояния
+                }
                 digitalWrite(xRelays[i].uiPin, xRelays[i].uiState);
                 uiReportBits |= SR_WAITING | xRelays[i].uiReportBit;
                 Serial.printf("[ vRelayCommandScheduledHandler ] Relay %i set to %i\n", i, xRelays[i].uiState);
+                if (xRelays[i].uiState == RELAY_STATE_ON && !bExternalControlEnabled && xRelays[i].uiAutoOffAfterSecs > 0) {
+                    Serial.printf("[ vRelayCommandScheduledHandler ] AutoOff for Relay %i scheduled after %i secs\n", i, xRelays[i].uiAutoOffAfterSecs);
+                    xRelays[i].xAutoOffTimer.once(xRelays[i].uiAutoOffAfterSecs, vAutoOffCB, (uint8_t)i);
+                }
             }
         }
     }
