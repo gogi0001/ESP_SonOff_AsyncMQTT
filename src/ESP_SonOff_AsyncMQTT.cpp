@@ -10,22 +10,22 @@
 #include <net_routine.h>
 
 // ----------- Пины esp8285 -----------------
-// #define PIN_BTN1        0
-// #define PIN_BTN2        9
-// #define PIN_BTN3        10
-// #define PIN_RELAY1      12  
-// #define PIN_RELAY2      5  
-// #define PIN_RELAY3      4
-// #define PIN_WIFI_LED    13
+#define PIN_BTN1        0
+#define PIN_BTN2        9
+#define PIN_BTN3        10
+#define PIN_RELAY1      12  
+#define PIN_RELAY2      5  
+#define PIN_RELAY3      4
+#define PIN_WIFI_LED    13
 
 // ----------- Пины nodemcu -----------------
-#define PIN_BTN1        14
-#define PIN_BTN2        12
-#define PIN_BTN3        13
-#define PIN_RELAY1      4
-#define PIN_RELAY2      5 
-#define PIN_RELAY3      16
-#define PIN_WIFI_LED    LED_BUILTIN
+// #define PIN_BTN1        14
+// #define PIN_BTN2        12
+// #define PIN_BTN3        13
+// #define PIN_RELAY1      4
+// #define PIN_RELAY2      5 
+// #define PIN_RELAY3      16
+// #define PIN_WIFI_LED    LED_BUILTIN
 
 #define LED_STATE_ON            LOW
 #define LED_STATE_OFF           HIGH
@@ -35,8 +35,8 @@
 #define BUTTON_STATE_RELEASE    HIGH
 
 #define RELAYS_COUNT   3
-#define RELAY_STATE_ON  LOW
-#define RELAY_STATE_OFF HIGH
+#define RELAY_STATE_ON  HIGH
+#define RELAY_STATE_OFF LOW
 
 #define AUTOOFF_DELAY_SECS  3600
 
@@ -335,16 +335,15 @@ void setup() {
     pinMode(PIN_RELAY2, OUTPUT); digitalWrite(PIN_RELAY2, RELAY_STATE_OFF);
     pinMode(PIN_RELAY3, OUTPUT); digitalWrite(PIN_RELAY3, RELAY_STATE_OFF);
 
-    pinMode(PIN_WIFI_LED, OUTPUT); digitalWrite(PIN_WIFI_LED, RELAY_STATE_OFF);
- 
+    pinMode(PIN_WIFI_LED, OUTPUT); digitalWrite(PIN_WIFI_LED, LED_STATE_OFF); 
 
     pinMode(PIN_BTN1, INPUT_PULLUP);
     pinMode(PIN_BTN2, INPUT_PULLUP);
     pinMode(PIN_BTN3, INPUT_PULLUP);
 
-    xReadButtonsTimer.attach_ms(50, vReadButtonsHandler);
-    xRelayCommandTimer.attach_ms(50, vRelayCommandScheduledHandler);
-    xReportTimer.attach_ms(500, vStateReportHandler);
+    xReadButtonsTimer.attach_ms(READ_BUTTONS_HANDLER_PERIOD_MS, vReadButtonsHandler);
+    xRelayCommandTimer.attach_ms(READ_BUTTONS_HANDLER_PERIOD_MS, vRelayCommandScheduledHandler);
+    xReportTimer.attach_ms(REPORT_HANDLER_SEND_MS, vStateReportHandler);
 
     xNoPingWatchTimer.attach(WAIT_FOR_PING_SECS, vNoPingWatchHandler);
     pvMessageCB = vMessageCB;

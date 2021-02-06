@@ -1,6 +1,7 @@
 .pio
 .vscode
 .piolibdeps
+_info
 platformio.ini
 include/env_options.h
 include/env_options_develop.h
